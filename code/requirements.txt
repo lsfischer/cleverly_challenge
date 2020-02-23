@@ -1,0 +1,12 @@
+imbalanced-learn==0.5.0
+matplotlib
+numpy
+nltk
+pandas
+seaborn
+scipy
+scikit-learn==0.21
+transformers
+tensorflow
+torch
+wordcloud

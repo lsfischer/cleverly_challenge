@@ -15,9 +15,11 @@ from nltk.tokenize import word_tokenize
 # loading the dataset
 df = pd.read_csv("../data/Clothing_Shoes_and_Jewelry_5.csv")
 
+df = df.sample(frac=0.15, random_state=42)
+
 # Convert unix timestamp to datetime object
 df.drop(["unixReviewTime", "asin", "overall", "reviewTime", "reviewerID",
-"reviewerName"], axis=1, inplace=True)
+"reviewerName", "summary"], axis=1, inplace=True)
 
 df = df.fillna("")
 
@@ -39,17 +41,17 @@ def clean_sentence(s):
     
     stop_words = set(stopwords.words('english'))
 
-    porter = PorterStemmer()
+    #porter = PorterStemmer()
 
     s = s.lower().translate(tbl) # Set the text to lower case and remove non-ascii chars
     s = s.translate(str.maketrans('','',string.punctuation)) # remove punctuation
     tokens = word_tokenize(s)
-    cleaned_s = [porter.stem(w) for w in tokens if w not in stop_words] # remove stop-words and stem regular words
-    return " ".join(cleaned_s)
+    cleaned_s = [w for w in tokens if w not in stop_words] # remove stop-words and stem regular words
+    return " ".join(cleaned_s[:21])
 
 # Apply clean_sentence to reviewText and summary; to reviewerName just remove non-ascii chars
+#df["reviewText"] = df["reviewText"].apply(clean_sentence)
 df["reviewText"] = df["reviewText"].apply(clean_sentence)
-df["summary"] = df["summary"].apply(clean_sentence)
 
 # Evaluating the string representation of the list to convert it to an actual list
 df["helpful"] = df["helpful"].apply(lambda str_list: ast.literal_eval(str_list))
@@ -72,7 +74,7 @@ tokenizer = transformers.DistilBertTokenizer.from_pretrained("distilbert-base-un
 model = transformers.DistilBertModel.from_pretrained("distilbert-base-uncased")
 
 # Tokenize the sentences adding the special "[CLS]" and "[SEP]" tokens
-tokenized = df["summary"].apply(lambda x: tokenizer.encode(x, add_special_tokens=True))
+tokenized = df["reviewText"].apply(lambda x: tokenizer.encode(x, add_special_tokens=True))
 
 # Get the length of the longest tokenized sentence
 max_len = tokenized.apply(len).max() 
@@ -95,15 +97,10 @@ with torch.no_grad():
 df_encoded = pd.DataFrame(encoder_hidden_state[0][:,0,:].numpy())
 
 # Insert the original columns in the beginning of the encoded dataframe
-df_encoded.insert(loc=0, column='original_summary', value=df["summary"])
+df_encoded.insert(loc=0, column='original_reviewText', value=df["reviewText"])
 df_encoded.insert(loc=0, column='helpful_review', value=df["helpful_review"])
 
 # Download the encoded csv
-df_encoded.to_csv("./bert_encoded_summary.csv", index=False)
-
-
-
-
-
+df_encoded.to_csv("./bert_encoded_reviewText_15.csv", index=False)
 
 ####### CANT LOAD IT INTO MEMORY, JUST TAKE A SMALL SAMPLE LIKE 5% OR SOMETHING LIKE THAT
