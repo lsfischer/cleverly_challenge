@@ -1,12 +1,11 @@
-# importing required libraries
 import ast # for evaluating string representation of lists
 import nltk
-import torch
 import string
 import itertools # for chaining ranges 
 import transformers # for using DistilBert
 import numpy as np
 import pandas as pd
+import pickle as pkl
 from scipy import sparse
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
@@ -15,43 +14,41 @@ from nltk.tokenize import word_tokenize
 # loading the dataset
 df = pd.read_csv("../data/Clothing_Shoes_and_Jewelry_5.csv")
 
-df = df.sample(frac=0.15, random_state=42)
+df = df.sample(frac=0.50, random_state=42).reset_index(drop=True)
 
-# Convert unix timestamp to datetime object
-df.drop(["unixReviewTime", "asin", "overall", "reviewTime", "reviewerID",
-"reviewerName", "summary"], axis=1, inplace=True)
+df = df.dropna()
 
-df = df.fillna("")
+ascii_ranges = itertools.chain(range(32), range(128, 257)) # join both ranges together
 
-def clean_sentence(s):
+# Create a lookup table specifying that non-ascii chars should be translated to empty strings
+# This table will be fed to str.translate
+# str.translate uses C-level table lookup so it's much faster than iterating over every char and replacing them
+replacement_tbl = dict.fromkeys(ascii_ranges, u"")
+    
+def clean_sentence(sentence):
     """
-        Given a sentence remove its punctuation and stop words
+        Given a sentence remove its punctuation, stop words and stem every word
         
         Arguments:
-            s - the input string to clean
+            sentence - the input string to clean
             
         Returns: The input string stripped out of punctuation and stopwords
     """
-    ascii_ranges = itertools.chain(range(32), range(128, 257))
-
-    # Create a lookup table specifying that non-ascii chars should be translated to empty strings
-    # This table will be fed to str.translate
-    # str.translate uses C-level table lookup so it's much faster than iterating over every char and replacing them
-    tbl = dict.fromkeys(ascii_ranges, u"")
     
     stop_words = set(stopwords.words('english'))
-
     #porter = PorterStemmer()
+    
+    try:
+        sentence = sentence.lower().translate(replacement_tbl) # Set the text to lower case and remove non-ascii chars
+        sentence = sentence.translate(str.maketrans('','',string.punctuation)) # remove punctuation
+        tokens = word_tokenize(sentence)
+        cleaned_s = [w for w in tokens if w not in stop_words] # remove stop-words and stem words
+        return " ".join(cleaned_s)
+    
+    except (AttributeError, TypeError):
+        raise AssertionError("Input variable 's' should be of type string")
 
-    s = s.lower().translate(tbl) # Set the text to lower case and remove non-ascii chars
-    s = s.translate(str.maketrans('','',string.punctuation)) # remove punctuation
-    tokens = word_tokenize(s)
-    cleaned_s = [w for w in tokens if w not in stop_words] # remove stop-words and stem regular words
-    return " ".join(cleaned_s[:21])
-
-# Apply clean_sentence to reviewText and summary; to reviewerName just remove non-ascii chars
-#df["reviewText"] = df["reviewText"].apply(clean_sentence)
-df["reviewText"] = df["reviewText"].apply(clean_sentence)
+df["summary"] = df["summary"].apply(clean_sentence)
 
 # Evaluating the string representation of the list to convert it to an actual list
 df["helpful"] = df["helpful"].apply(lambda str_list: ast.literal_eval(str_list))
@@ -62,11 +59,18 @@ df[['num_yes_votes','num_votes']] = pd.DataFrame(df["helpful"].values.tolist(), 
 # Avoid dividing by zero with np.where
 df["prop_yes_votes"] = np.where(df["num_votes"] == 0, 0, df["num_yes_votes"] / df["num_votes"])
 
+df["num_words"] = df["reviewText"].str.count("\w+")
+
+# Create new feature that is the deviation of the users overall review to the product
+# from that products overall mean
+product_overall_mean = df.groupby("asin")['overall'].mean().to_dict()
+df['product_overall_mean'] = df['asin'].map(product_overall_mean).values
+df['overall_deviation'] = df['overall'] - df['product_overall_mean']
+
 # Creating the binary target label indicating if a review was helpful or not
 df["helpful_review"] = ((df["num_votes"] >= 4) & (df["prop_yes_votes"] >= 0.5)).astype(int)
 
-df.drop(["prop_yes_votes", "num_yes_votes", "num_votes", "helpful"], axis=1, inplace=True)
-
+# --BERT PART--
 
 # Loading pretrained model/tokenizer
 # This is the Distilled, base, uncased version of BERT 
@@ -74,7 +78,7 @@ tokenizer = transformers.DistilBertTokenizer.from_pretrained("distilbert-base-un
 model = transformers.DistilBertModel.from_pretrained("distilbert-base-uncased")
 
 # Tokenize the sentences adding the special "[CLS]" and "[SEP]" tokens
-tokenized = df["reviewText"].apply(lambda x: tokenizer.encode(x, add_special_tokens=True))
+tokenized = df["summary"].apply(lambda x: tokenizer.encode(x, add_special_tokens=True))
 
 # Get the length of the longest tokenized sentence
 max_len = tokenized.apply(len).max() 
@@ -96,11 +100,13 @@ with torch.no_grad():
 # Create a new dataframe with the encoded features
 df_encoded = pd.DataFrame(encoder_hidden_state[0][:,0,:].numpy())
 
-# Insert the original columns in the beginning of the encoded dataframe
-df_encoded.insert(loc=0, column='original_reviewText', value=df["reviewText"])
-df_encoded.insert(loc=0, column='helpful_review', value=df["helpful_review"])
+# Re add columns
+df_encoded["helpful_review"] = df["helpful_review"]
+df_encoded["original_summary"] = df["summary"]
+df_encoded["num_words"] = df["num_words"]
+df_encoded["overall"] = df["overall"]
+df_encoded["overall_deviation"] = df["overall_deviation"]
 
-# Download the encoded csv
-df_encoded.to_csv("./bert_encoded_reviewText_15.csv", index=False)
-
-####### CANT LOAD IT INTO MEMORY, JUST TAKE A SMALL SAMPLE LIKE 5% OR SOMETHING LIKE THAT
+# Save file as pickle format
+with open("bert_encoded_summary.pkl", "wb") as file_out:
+    pkl.dump(df_encoded, file_out)
