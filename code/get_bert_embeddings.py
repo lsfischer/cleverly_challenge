@@ -14,9 +14,13 @@ from nltk.tokenize import word_tokenize
 # loading the dataset
 df = pd.read_csv("../data/Clothing_Shoes_and_Jewelry_5.csv")
 
+# Due to RAM constrainits it was not possible to get the embeddings for the entire
+# dataframe so a sample of 50% of the dataset was used
+# However note that this scrip was run on a Google Cloud VM with 406Gb of RAM
+# to run this locall a smaller sample must be used (e.g. 1%)
 df = df.sample(frac=0.50, random_state=42).reset_index(drop=True)
 
-df = df.dropna()
+df = df.fillna("")
 
 ascii_ranges = itertools.chain(range(32), range(128, 257)) # join both ranges together
 
@@ -70,7 +74,7 @@ df['overall_deviation'] = df['overall'] - df['product_overall_mean']
 # Creating the binary target label indicating if a review was helpful or not
 df["helpful_review"] = ((df["num_votes"] >= 4) & (df["prop_yes_votes"] >= 0.5)).astype(int)
 
-# --BERT PART--
+# ---DistilBERT PART---
 
 # Loading pretrained model/tokenizer
 # This is the Distilled, base, uncased version of BERT 
@@ -100,7 +104,15 @@ with torch.no_grad():
 # Create a new dataframe with the encoded features
 df_encoded = pd.DataFrame(encoder_hidden_state[0][:,0,:].numpy())
 
-# Re add columns
+# Remove lines with empty strings
+df_encoded = df_encoded[~(df["summary"] == "").any(axis=1)]
+df = df[~(df["summary"] == "").any(axis=1)]
+
+# Reset index as a sanity check
+df_encoded = df_encoded.reset_index(drop=True)
+df = df.reset_index(drop=True)
+
+# Re-add columns
 df_encoded["helpful_review"] = df["helpful_review"]
 df_encoded["original_summary"] = df["summary"]
 df_encoded["num_words"] = df["num_words"]
