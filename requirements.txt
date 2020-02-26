@@ -1,3 +1,4 @@
+h5py
 imbalanced-learn==0.5.0
 lightgbm
 matplotlib

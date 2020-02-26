@@ -11,7 +11,8 @@ cleverly_challenge/
         └── get_bert_embeddings.py ; Script used to get BERT embeddings
     ├── data
         ├── Clothing_Shoes_and_Jewelry_5.csv ; main dataset file
-        └── bert_encoded_summary.pkl ; Pickled dataframe containing BERT embeddings
+        ├── bert_encoded_summary.pkl ; Pickled dataframe containing BERT embeddings
+        └── neural_net_model.h5 ; Trained neural network for bert embeddings
     └── requirements.txt ; library requirements to install
 ```
 
